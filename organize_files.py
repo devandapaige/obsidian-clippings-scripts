@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+Organize clippings (initial thoughts/intuitions) from Clippings folder into Archives.
+
+These files contain personal reflections captured after reading/watching longer-form content,
+not full articles. They are organized by category into the Archives folder structure.
+"""
 import os
 import shutil
 import sys
@@ -29,6 +35,92 @@ def normalize_filename(filename: str) -> str:
     normalized = ''.join(c for c in normalized if c.isalnum() or c in [' ', '-'])
     normalized = ' '.join(normalized.split())
     return normalized
+
+def extract_insights_from_file(filepath: str) -> Tuple[str, str, Optional[str]]:
+    """
+    Extract title, user's thoughts, and date from a clipping file.
+    Returns (title, thoughts, date) tuple.
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Extract title and date from frontmatter
+        title = None
+        date = None
+        if content.startswith('---'):
+            # Find the end of frontmatter
+            end_idx = content.find('---', 3)
+            if end_idx != -1:
+                frontmatter = content[3:end_idx]
+                # Look for title and date fields
+                for line in frontmatter.split('\n'):
+                    if line.startswith('title:'):
+                        title = line.split('title:', 1)[1].strip().strip('"').strip("'")
+                    elif line.startswith('created:'):
+                        date = line.split('created:', 1)[1].strip()
+                    elif line.startswith('published:') and not date:
+                        # Use published date if created date not available
+                        date = line.split('published:', 1)[1].strip()
+        
+        # Extract thoughts (content after frontmatter)
+        thoughts = ""
+        if content.startswith('---'):
+            end_idx = content.find('---', 3)
+            if end_idx != -1:
+                thoughts = content[end_idx + 3:].strip()
+        else:
+            thoughts = content.strip()
+        
+        # If no title found, use filename without extension
+        if not title:
+            title = os.path.splitext(os.path.basename(filepath))[0]
+        
+        return title, thoughts, date
+    except Exception as e:
+        # Fallback to filename if extraction fails
+        title = os.path.splitext(os.path.basename(filepath))[0]
+        return title, "", None
+
+def append_to_insights_index(title: str, thoughts: str, file_path: str, date: Optional[str] = None):
+    """Append an entry to the insights index file, avoiding duplicates."""
+    insights_file = os.path.join('Archives', 'INSIGHTS.md')
+    
+    # Check if entry already exists
+    entry_exists = False
+    if os.path.exists(insights_file):
+        with open(insights_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Check if this title already exists
+            if f"## {title}\n" in content:
+                entry_exists = True
+    
+    # Skip if entry already exists
+    if entry_exists:
+        return
+    
+    # Create file with header if it doesn't exist
+    if not os.path.exists(insights_file):
+        with open(insights_file, 'w', encoding='utf-8') as f:
+            f.write("# Archives Insights Index\n\n")
+            f.write("This file contains a chronological index of all your insights and thoughts from consumed content.\n\n")
+            f.write("---\n\n")
+    
+    # Format date if available
+    date_str = ""
+    if date:
+        date_str = f"**Date:** {date}\n\n"
+    
+    # Append new entry
+    with open(insights_file, 'a', encoding='utf-8') as f:
+        f.write(f"## {title}\n\n")
+        if date_str:
+            f.write(date_str)
+        if thoughts:
+            # Show full thoughts (these are your personal insights, so keep them complete)
+            f.write(f"{thoughts}\n\n")
+        f.write(f"📍 `Archives/{file_path}`\n\n")
+        f.write("---\n\n")
 
 def find_matching_file(filename: str, directory: str) -> Optional[str]:
     """Find a matching file in directory using fuzzy matching."""
@@ -69,10 +161,34 @@ def create_directory_structure():
             (base / category / subcategory).mkdir(parents=True, exist_ok=True)
 
 def organize_files(categorization_file: str):
-    """Main function to organize files."""
+    """
+    Main function to organize clippings (initial thoughts/intuitions) into Archives.
+    
+    Moves files from Clippings directory to appropriate Archive subdirectories
+    based on the categorization file. Files contain personal reflections, not full articles.
+    """
     if not os.path.exists('Clippings'):
         print("Error: Clippings directory not found!")
         return
+    
+    # Check if Clippings directory is empty
+    clippings_files = [f for f in os.listdir('Clippings') if not f.startswith('.') and f.endswith('.md')]
+    if not clippings_files:
+        print("Warning: Clippings directory appears to be empty!")
+        print("This might mean files were already moved. Checking Archives...")
+        # Count files in Archives that match our categorization
+        entries = parse_categorization_file(categorization_file)
+        found_count = 0
+        for filename, primary, _ in entries:
+            archive_path = os.path.join('Archives', primary, filename)
+            if os.path.exists(archive_path):
+                found_count += 1
+        if found_count > 0:
+            print(f"Found {found_count}/{len(entries)} files already in Archives.")
+            print("Files may have already been organized. Exiting to prevent duplicate processing.")
+            return
+        else:
+            print("No matching files found in Archives. Proceeding anyway...")
 
     create_directory_structure()
     entries = parse_categorization_file(categorization_file)
@@ -99,9 +215,27 @@ def organize_files(categorization_file: str):
         try:
             # Copy file to primary category
             shutil.copy2(source_path, primary_path)
-            os.remove(source_path)  # Remove original after successful copy
+            
+            # Verify copy succeeded before removing original
+            if not os.path.exists(primary_path):
+                raise Exception(f"Copy verification failed: {primary_path} does not exist")
+            
+            # Verify file sizes match (basic integrity check)
+            source_size = os.path.getsize(source_path)
+            dest_size = os.path.getsize(primary_path)
+            if source_size != dest_size:
+                raise Exception(f"Copy verification failed: size mismatch (source: {source_size}, dest: {dest_size})")
+            
+            # Only remove original after successful copy and verification
+            os.remove(source_path)
             print(f"  → Copied to Archives/{primary}/")
             stats['moved'] += 1
+            
+            # Extract insights and append to insights index
+            title, thoughts, date = extract_insights_from_file(primary_path)
+            archive_path = f"{primary}/{actual_filename}"
+            append_to_insights_index(title, thoughts, archive_path, date)
+            print(f"  → Added to insights index")
             
             # Handle secondary category if specified
             if secondary and secondary != 'CATEGORY':

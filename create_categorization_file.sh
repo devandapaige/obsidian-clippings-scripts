@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# Creates a template file listing all clippings for you to categorize
+# Creates a template file listing all clippings (initial thoughts/intuitions) for you to categorize
+# These are personal reflections captured after reading/watching longer-form content
 
 OUTPUT_FILE="categorize_all.txt"
 
 echo "# Format: filename|primary_category|secondary_category" > $OUTPUT_FILE
+echo "# These files contain your initial thoughts and intuition after reading/watching content" >> $OUTPUT_FILE
 echo "# Primary categories should be one of:" >> $OUTPUT_FILE
 echo "# AI-and-Technology/AI-Limitations" >> $OUTPUT_FILE
 echo "# AI-and-Technology/Tech-Competition" >> $OUTPUT_FILE 
@@ -30,4 +32,4 @@ find Clippings -name "*.md" -type f | sort | while read -r file; do
 done
 
 echo "Created $OUTPUT_FILE with all clippings."
-echo "Now edit this file to add categories, then run the organize_all.sh script." 
+echo "Now edit this file to add categories, then run: python3 organize_files.py categorize_all.txt" 
